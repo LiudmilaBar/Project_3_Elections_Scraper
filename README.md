@@ -52,6 +52,7 @@ Příklad:
 Vysledky hlasování pro okres Benešov:
 1. argument https://www.volby.cz/pls/ps2017nss/ps32?xjazyk=CZ&xkraj=2&xnumnuts=2101
 2. argument vysledky_benesov.csv
+   
 Spuštění programu: 'python main.py "https://www.volby.cz/pls/ps2017nss/ps32?xjazyk=CZ&xkraj=2&xnumnuts=2101" vysledky_benesov.csv'
 Průběh stahování:
 Elections Scraper 2017
