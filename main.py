@@ -1,6 +1,7 @@
 import csv
 import sys
 from typing import Dict, List
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -11,14 +12,24 @@ BASE_URL = "https://www.volby.cz/pls/ps2017nss/"
 
 def get_soup(url: str) -> BeautifulSoup:
     """Stáhne stránku a vrátí BeautifulSoup objekt."""
-    response = requests.get(url)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as error:
+        raise ConnectionError(f"Chyba při stahování stránky: {error}") from error
+
     return BeautifulSoup(response.text, "html.parser")
 
 
 def clean_number(value: str) -> str:
     """Odstraní mezery a neviditelné znaky z čísla."""
     return value.replace("\xa0", "").replace(" ", "").strip()
+
+
+def validate_url(url: str) -> None:
+    """Ověří, že URL patří webu volby.cz."""
+    if "volby.cz" not in url:
+        raise ValueError("Neplatná URL. Použijte odkaz z webu volby.cz.")
 
 
 def get_towns_list(url: str) -> List[Dict[str, str]]:
@@ -35,9 +46,13 @@ def get_towns_list(url: str) -> List[Dict[str, str]]:
                     {
                         "code": cells[0].text.strip(),
                         "name": cells[1].text.strip(),
-                        "url": BASE_URL + link["href"],
+                        "url": urljoin(BASE_URL, link["href"]),
                     }
                 )
+
+    if not towns:
+        raise ValueError("Na stránce nebyly nalezeny žádné obce.")
+
     return towns
 
 
@@ -45,6 +60,10 @@ def get_voting_data(url: str) -> Dict[str, str]:
     """Získá výsledky hlasování pro jednu obec."""
     soup = get_soup(url)
     tables = soup.find_all("table")
+
+    if not tables:
+        raise ValueError("Stránka neobsahuje žádné tabulky s výsledky.")
+
     results: Dict[str, str] = {}
 
     # Základní údaje
@@ -92,7 +111,11 @@ def scrape_district(url: str) -> List[Dict[str, str]]:
 
     for i, town in enumerate(towns, 1):
         print(f"Zpracovávám ({i}/{len(towns)}): {town['name']}")
-        voting = get_voting_data(town["url"])
+        try:
+            voting = get_voting_data(town["url"])
+        except Exception as error:
+            print(f"  Chyba u obce {town['name']}: {error}")
+            continue
 
         town_result = {
             "code": town["code"],
@@ -111,10 +134,12 @@ def save_to_csv(data: List[Dict[str, str]], filename: str) -> None:
         return
 
     basic_keys = ["code", "location", "registered", "envelopes", "valid"]
-    party_keys = [
-        key for key in data[0].keys() if key not in basic_keys
-    ]
 
+    all_keys = set()
+    for row in data:
+        all_keys.update(row.keys())
+
+    party_keys = sorted(key for key in all_keys if key not in basic_keys)
     headers = basic_keys + party_keys
 
     with open(filename, "w", newline="", encoding="utf-8") as file:
@@ -129,21 +154,26 @@ def main() -> None:
     """Hlavní funkce programu."""
     if len(sys.argv) != 3:
         print("Použití: python main.py <URL_okresu> <vystupni_soubor.csv>")
-        print(
-            "Příklad:\n"
-            "python main.py "
-            "'https://www.volby.cz/pls/ps2017nss/"
-            "ps32?xjazyk=CZ&xkraj=2&xnumnuts=2101' vysledky.csv"
-        )
         sys.exit(1)
 
     district_url = sys.argv[1]
     output_file = sys.argv[2]
 
+    try:
+        validate_url(district_url)
+    except ValueError as error:
+        print(error)
+        sys.exit(1)
+
     print("Elections Scraper 2017")
     print("=" * 50)
 
-    results = scrape_district(district_url)
+    try:
+        results = scrape_district(district_url)
+    except Exception as error:
+        print(f"Chyba při zpracování okresu: {error}")
+        sys.exit(1)
+
     results = normalize_data(results)
     save_to_csv(results, output_file)
 
